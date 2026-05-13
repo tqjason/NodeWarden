@@ -9,6 +9,11 @@ import { isTotpEnabled, verifyTotpToken } from '../utils/totp';
 import { createRecoveryCode, recoveryCodeEquals } from '../utils/recovery-code';
 import { buildAccountKeys } from '../utils/user-decryption';
 
+// CONTRACT:
+// users.master_password_hash is server-side login verification only. It does
+// not decrypt vault data. Password changes must keep encrypted user key material,
+// securityStamp, refresh-token invalidation, and client compatibility together.
+// Password hints are non-secret reminders; never treat them as recovery secrets.
 function looksLikeEncString(value: string): boolean {
   if (!value) return false;
   const firstDot = value.indexOf('.');
@@ -521,6 +526,7 @@ export async function handleChangePassword(request: Request, env: Env, userId: s
   user.updatedAt = new Date().toISOString();
   await storage.saveUser(user);
   await storage.deleteRefreshTokensByUserId(user.id);
+  AuthService.invalidateUserCache(user.id);
   await storage.createAuditLog({
     id: generateUUID(),
     actorUserId: user.id,
@@ -582,6 +588,7 @@ export async function handleSetTotpStatus(request: Request, env: Env, userId: st
     user.updatedAt = new Date().toISOString();
     await storage.saveUser(user);
     await storage.deleteRefreshTokensByUserId(user.id);
+    AuthService.invalidateUserCache(user.id);
     return jsonResponse({ enabled: true, recoveryCode: user.totpRecoveryCode, object: 'twoFactor' });
   }
 
@@ -596,6 +603,7 @@ export async function handleSetTotpStatus(request: Request, env: Env, userId: st
     user.updatedAt = new Date().toISOString();
     await storage.saveUser(user);
     await storage.deleteRefreshTokensByUserId(user.id);
+    AuthService.invalidateUserCache(user.id);
     return jsonResponse({ enabled: false, object: 'twoFactor' });
   }
 
@@ -703,6 +711,7 @@ export async function handleRecoverTwoFactor(request: Request, env: Env): Promis
   user.updatedAt = new Date().toISOString();
   await storage.saveUser(user);
   await storage.deleteRefreshTokensByUserId(user.id);
+  AuthService.invalidateUserCache(user.id);
   await rateLimit.clearLoginAttempts(recoverLimitKey);
 
   return jsonResponse({
@@ -796,6 +805,7 @@ async function apiKey(request: Request, env: Env, userId: string, rotate: boolea
     }
     user.updatedAt = new Date().toISOString();
     await storage.saveUser(user);
+    AuthService.invalidateUserCache(user.id);
   }
 
   return jsonResponse({
